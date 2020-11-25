@@ -52,24 +52,46 @@ void cityBlock(pcl::visualization::PCLVisualizer::Ptr& viewer, ProcessPointCloud
     renderPointCloud(viewer,filterCloud,"filterCloud");
 
     //Segment and Render
-    std::pair<pcl::PointCloud<pcl::PointXYZI>::Ptr, pcl::PointCloud<pcl::PointXYZI>::Ptr> segmentCloud = pointProcessorI->SegmentPlane(filterCloud, 1000, 0.25);
-    renderPointCloud(viewer,segmentCloud.first,"obstCloud",Color(1,0,0));
+    
+    //Segment using PCL library function
+    //std::pair<pcl::PointCloud<pcl::PointXYZI>::Ptr, pcl::PointCloud<pcl::PointXYZI>::Ptr> segmentCloud = pointProcessorI->SegmentPlane(filterCloud, 1000, 0.25);
+
+    //Segment using RANSAC function
+    std::pair<pcl::PointCloud<pcl::PointXYZI>::Ptr, pcl::PointCloud<pcl::PointXYZI>::Ptr> segmentCloud = pointProcessorI->SegmentPlaneRansac(filterCloud, 1000, 0.25);
+    //renderPointCloud(viewer,segmentCloud.first,"obstCloud",Color(1,0,0));
     renderPointCloud(viewer,segmentCloud.second,"planeCloud",Color(0,1,0));
     
+    //Clustering using PCL Library function
+    //std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> cloudClusters = pointProcessorI->Clustering(segmentCloud.first, 0.3, 10, 300);
+
+    //Euclidean clustering
     
-    std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> cloudClusters = pointProcessorI->Clustering(segmentCloud.first, 0.5, 10, 300);
+    //KD Tree 
+    KdTree* tree = new KdTree;
+     
+    for (int i=0; i<segmentCloud.first->points.size(); i++) 
+    	tree->insert(segmentCloud.first->points[i],i); 
 
-    int clusterId = 0;
-    std::vector<Color> colors = {Color(1,0,0), Color(1,1,0), Color(0,0,1)};
+    std::vector<std::vector<int>> clusters = pointProcessorI->EuclideanClustering(segmentCloud.first, tree, 0.3);
 
-    for(pcl::PointCloud<pcl::PointXYZI>::Ptr cluster : cloudClusters)
-    {
-        pointProcessorI->numPoints(cluster);
-        renderPointCloud(viewer,cluster,"obstCloud"+std::to_string(clusterId),colors[clusterId%3]);
-        Box box = pointProcessorI->BoundingBox(cluster);
-        renderBox(viewer,box,clusterId);
-        ++clusterId;
-    }
+  	// Render clusters
+  	int clusterId = 0;
+	std::vector<Color> colors = {Color(1,0,0), Color(1,1,0), Color(0,0,1)};
+  	for(std::vector<int> cluster : clusters)
+  	{
+  		pcl::PointCloud<pcl::PointXYZI>::Ptr clusterCloud(new pcl::PointCloud<pcl::PointXYZI>());
+  		for(int indice: cluster)
+  			clusterCloud->points.push_back(segmentCloud.first->points[indice]);
+  		
+        if(clusterCloud->points.size() > 20 and clusterCloud->points.size() < 500)
+        {
+            renderPointCloud(viewer, clusterCloud,"cluster"+std::to_string(clusterId),colors[clusterId%3]);
+            Box box = pointProcessorI->BoundingBox(clusterCloud);
+            renderBox(viewer,box,clusterId);
+        }
+  		++clusterId;
+  	}
+
     
 }
 

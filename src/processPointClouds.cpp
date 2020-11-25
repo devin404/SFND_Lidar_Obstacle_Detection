@@ -1,7 +1,7 @@
 // PCL lib Functions for processing point clouds 
 
 #include "processPointClouds.h"
-
+#include <unordered_set> //To use unordered set dring RANSAC algorithm
 
 //constructor:
 template<typename PointT>
@@ -93,6 +93,85 @@ std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT
     return segResult;
 }
 
+//Function to segment th plane using RANSAC
+template<typename PointT>
+std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT>::Ptr> ProcessPointClouds<PointT>::SegmentPlaneRansac(typename pcl::PointCloud<PointT>::Ptr cloud, int maxIterations, float distanceTol)
+{
+	std::unordered_set<int> inliersResult;
+	srand(time(NULL));
+	
+	int numPoints = cloud->points.size();
+	float x1, x2, x3, y1, y2, y3, z1, z2, z3, x, y, z;
+	float A, B, C, D, dist;
+
+	for(int i=0; i<maxIterations; i++)
+	{
+		std::unordered_set<int> inliers;
+		while(inliers.size()<3)
+		{
+			inliers.insert(rand()%numPoints);
+		}
+		auto itr = inliers.begin();
+		x1 = cloud->points[*itr].x; 
+		y1 = cloud->points[*itr].y;
+		z1 = cloud->points[*itr].z;
+		itr++;
+		x2 = cloud->points[*itr].x; 
+		y2 = cloud->points[*itr].y;
+		z2 = cloud->points[*itr].z;
+
+		itr++;
+		x3 = cloud->points[*itr].x; 
+		y3 = cloud->points[*itr].y;
+		z3 = cloud->points[*itr].z;
+
+		A = (y2-y1)*(z3-z1) - (z2-z1)*(y3-y1);
+		B = (z2-z1)*(x3-x1) - (x2-x1)*(z3-z1);
+		C = (x2-x1)*(y3-y1) - (y2-y1)*(x3-x1);
+		D = -1 * (A*x1 + B*y1 + C*z1);
+
+		for(int j =0; j< numPoints; j++)
+		{
+			PointT point = cloud->points[j];
+			x = point.x; 
+			y = point.y;
+			z = point.z;
+
+			if(inliers.count(j)>0)
+				continue;
+			
+			dist = fabs(A*x + B*y + C*z + D)/(sqrt(A*A + B*B + C*C));
+			if(dist < distanceTol)
+			{
+				inliers.insert(j);
+			}
+
+		}
+
+		if(inliers.size() > inliersResult.size())
+		{
+			inliersResult = inliers;
+		}	
+	}
+
+    //Cloud inliers and outliers creation using inliner indices
+    typename pcl::PointCloud<PointT>::Ptr  cloudInliers(new pcl::PointCloud<PointT>());
+	typename pcl::PointCloud<PointT>::Ptr cloudOutliers(new pcl::PointCloud<PointT>());
+
+	for(int index = 0; index < cloud->points.size(); index++)
+	{
+		PointT point = cloud->points[index];
+		if(inliersResult.count(index))
+			cloudInliers->points.push_back(point);
+		else
+			cloudOutliers->points.push_back(point);
+	}
+
+    std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT>::Ptr> segResult(cloudOutliers, cloudInliers);
+	
+    return segResult;
+
+}
 
 template<typename PointT>
 std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT>::Ptr> ProcessPointClouds<PointT>::SegmentPlane(typename pcl::PointCloud<PointT>::Ptr cloud, int maxIterations, float distanceThreshold)
@@ -130,6 +209,48 @@ std::pair<typename pcl::PointCloud<PointT>::Ptr, typename pcl::PointCloud<PointT
     return segResult;
 }
 
+template<typename PointT>
+void ProcessPointClouds<PointT>::clusterHelper(int indice, const typename pcl::PointCloud<PointT>::Ptr Points, std::vector<int>& cluster, std::vector<bool>& processed, KdTree* tree, float distanceTol)
+{
+	processed[indice] = true;
+	cluster.push_back(indice);
+
+	std::vector<int> nearPoints = tree->search(Points->points[indice], distanceTol);
+	
+	for(int id : nearPoints)
+	{
+		if(!processed[id])
+			clusterHelper(id, Points, cluster, processed, tree, distanceTol);
+	}
+
+}
+
+template<typename PointT>
+std::vector<std::vector<int>> ProcessPointClouds<PointT>::EuclideanClustering(typename pcl::PointCloud<PointT>::Ptr Points, KdTree* tree, float distanceTol)
+{
+
+	// TODO: Fill out this function to return list of indices for each cluster
+
+	std::vector<std::vector<int>> clusters;
+	std::vector<bool> processed(Points->size(),false);
+	int i = 0;
+
+	while(i< Points->size())
+	{
+		if(!processed[i])
+		{
+			std::vector<int> cluster;
+			clusterHelper(i, Points, cluster, processed, tree, distanceTol);
+			clusters.push_back(cluster);
+		}
+
+		i++;
+
+	}
+
+	return clusters;
+
+}
 
 template<typename PointT>
 std::vector<typename pcl::PointCloud<PointT>::Ptr> ProcessPointClouds<PointT>::Clustering(typename pcl::PointCloud<PointT>::Ptr cloud, float clusterTolerance, int minSize, int maxSize)
